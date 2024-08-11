@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Video Capture</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+            background-color: #e9ecef;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .container {
+            text-align: center;
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            margin: 20px 10px;
+            width: 100%;
+            max-width: 800px;
+        }
+
+        video {
+            width: 100%;
+            max-width: 700px;
+            margin-bottom: 15px;
+            border-radius: 12px;
+            border: 3px solid #dee2e6;
+        }
+
+        .controls {
+            margin-bottom: 15px;
+        }
+
+        button {
+            padding: 12px 24px;
+            margin: 6px;
+            border: none;
+            border-radius: 8px;
+            background-color: #007bff;
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.2s;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+            transform: scale(1.05);
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        .message {
+            margin-bottom: 15px;
+            font-size: 20px;
+            color: #343a40;
+            font-weight: bold;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .loader {
+            border: 8px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 8px solid #007bff;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .audio-controls {
+            margin-top: 20px;
+        }
+
+        #response {
+            text-align: left;
+        }
+
+        .response-container {
+            text-align: left;
+            max-width: 700px;
+            margin: 20px auto;
+            max-height: 350px;
+            overflow-y: auto;
+            padding: 20px;
+            border: 1px solid #dee2e6;
+            border-radius: 12px;
+            background: #f8f9fa;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        #response {
+            text-align: left;
+        }
+
+        h1 {
+            font-size: 3rem;
+            color: #333;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            background: linear-gradient(to right, #007bff, #00d084);
+            -webkit-background-clip: text;
+            color: transparent;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Smart Capture</h1>
+        <video id="video" autoplay></video>
+        <div class="message" id="message"></div>
+        <div class="controls">
+            <button id="startBtn">Start</button>
+            <button id="stopBtn" class="hidden">Stop</button>
+        </div>
+        <div id="loader" class="loader hidden"></div>
+        <div id="responseContainer" class="hidden response-container">
+            <div id="response"></div>
+        </div>
+        <div class="audio-controls">
+            <button id="playAudio" class="hidden">Play Audio</button>
+            <button id="stopAudio" class="hidden">Stop Audio</button>
+            <button id="copyResponse" class="hidden">Copy Response</button>
+        </div>
+    </div>
+    <script>
+        const video = document.getElementById('video');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const message = document.getElementById('message');
+        const responseDiv = document.getElementById('response');
+        const loader = document.getElementById('loader');
+        const responseContainer = document.getElementById('responseContainer');
+        const playAudioBtn = document.getElementById('playAudio');
+        const stopAudioBtn = document.getElementById('stopAudio');
+        const copyResponseBtn = document.getElementById('copyResponse');
+
+        let mediaRecorder;
+        let recordedChunks = [];
+        let synth = window.speechSynthesis;
+        let utterance;
+
+        async function getPreferredCamera() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                const backCamera = videoDevices.find(device => device.label.toLowerCase().includes('back'));
+                const frontCamera = videoDevices.find(device => device.label.toLowerCase().includes('front'));
+                return backCamera ? backCamera.deviceId : frontCamera ? frontCamera.deviceId : null;
+            } catch (error) {
+                console.error('Error accessing devices:', error);
+                return null;
+            }
+        }
+
+        async function startVideoCapture() {
+            try {
+                const cameraId = await getPreferredCamera();
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { deviceId: cameraId ? { exact: cameraId } : undefined }
+                });
+                video.srcObject = stream;
+
+                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder.ondataavailable = event => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                    recordedChunks = [];
+                    const formData = new FormData();
+                    formData.append('file', blob, 'recorded_video.webm');
+                    loader.classList.remove('hidden');
+                    try {
+                        const response = await fetch('/upload', {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+
+                        const data = await response.json();
+                        loader.classList.add('hidden');
+                        responseContainer.classList.remove('hidden');
+
+                        if (data.error) {
+                            responseDiv.innerHTML = `Error: ${data.error}`;
+                        } else {
+                            responseDiv.innerHTML = (data.summary);
+                            playAudioBtn.classList.remove('hidden');
+                            stopAudioBtn.classList.remove('hidden');
+                            copyResponseBtn.classList.remove('hidden');
+
+                            utterance = new SpeechSynthesisUtterance(data.summary);
+                        }
+                    } catch (error) {
+                        loader.classList.add('hidden');
+                        console.error('Error uploading video:', error);
+                        responseDiv.innerHTML = 'Error uploading video.';
+                    }
+                };
+            } catch (error) {
+                console.error('Error accessing media devices or starting video capture:', error);
+            }
+        }
+
+        startBtn.addEventListener('click', () => {
+            if (mediaRecorder && mediaRecorder.state === 'inactive') {
+                mediaRecorder.start();
+                message.textContent = 'Video recording has started!';
+                startBtn.classList.add('hidden');
+                stopBtn.classList.remove('hidden');
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                message.textContent = 'Video recorded successfully!';
+                startBtn.classList.remove('hidden');
+                stopBtn.classList.add('hidden');
+            }
+        });
+
+        playAudioBtn.addEventListener('click', () => {
+            if (utterance) {
+                synth.speak(utterance);
+            }
+        });
+
+        stopAudioBtn.addEventListener('click', () => {
+            if (synth.speaking) {
+                synth.cancel();
+            }
+        });
+
+        copyResponseBtn.addEventListener('click', () => {
+            if (responseDiv.textContent) {
+                navigator.clipboard.writeText(responseDiv.textContent).then(() => {
+                    alert('Response copied to clipboard!');
+                }).catch(err => {
+                    console.error('Failed to copy text:', err);
+                });
+            }
+        });
+
+        startVideoCapture();
+    </script>
+</body>
+
+</html>
